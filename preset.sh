@@ -3,9 +3,10 @@
 # Define the options you want to preselect (either ON or OFF)
 # IMPORTANT: answer should be inside ""
 
-### Script will install nvidia-dkms nvidia-utils & nvidia-settings
+### Script will install akmod-nvidia, xorg-x11-drv-nvidia-cuda, etc.
 ###-Would you like script to Configure NVIDIA for you?
-nvidia="OFF"
+### ON par défaut pour cette machine (NVIDIA GTX 1060) — Rev0li
+nvidia="ON"
 
 ###-Install GTK themes (required for Dark/Light function)?
 gtk_themes="ON"
