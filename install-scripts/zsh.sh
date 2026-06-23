@@ -1,12 +1,24 @@
 #!/bin/bash
 # 💫 https://github.com/JaKooLit 💫 #
-# ZSH and oh-my-zsh #
+# ZSH — version Rev0li #
+#
+# DIFFÉRENCE avec l'upstream JaKooLit :
+#   - PAS d'oh-my-zsh : la configuration Zsh est fournie par mes dotfiles
+#     (https://github.com/Rev0li/dotfiles), posés par dotfiles-main.sh.
+#   - On NE copie PAS assets/.zshrc / assets/.zprofile (ils seraient écrasés
+#     par les symlinks de mes dotfiles de toute façon).
+#   - Ce script se limite à : installer zsh + outils CLI, définir zsh comme
+#     shell par défaut. La config (symlink ~/.zshrc) est faite plus tard.
 
+# Paquets CLI requis par mes dotfiles (eza/lsd, fzf, etc.) + zsh lui-même.
 zsh=(
-  lsd
   fzf
-  mercurial
-  zsh 
+  git
+  curl
+  tar
+  unzip
+  fontconfig
+  zsh
   util-linux
 )
 
@@ -34,49 +46,15 @@ while [ -f "$LOG" ]; do
 done
 
 # Installing zsh packages
-printf "${NOTE} Installing core zsh packages...${RESET}\n"
+printf "${NOTE} Installing core zsh packages (Rev0li flavor)...${RESET}\n"
 for ZSHP in "${zsh[@]}"; do
   install_package "$ZSHP"
 done
 
 printf "\n%.0s" {1..1}
 
-# Install Oh My Zsh, plugins, and set zsh as default shell
+# Set zsh as the default shell (the actual config comes from my dotfiles)
 if command -v zsh >/dev/null; then
-  printf "${NOTE} Installing ${SKY_BLUE}Oh My Zsh and plugins${RESET} ...\n"
-  if [ ! -d "$HOME/.oh-my-zsh" ]; then  
-    sh -c "$(curl -fsSL https://install.ohmyz.sh)" "" --unattended  	       
-  else
-    echo "${INFO} Directory .oh-my-zsh already exists. Skipping re-installation." 2>&1 | tee -a "$LOG"
-  fi
-  
-  # Check if the directories exist before cloning the repositories
-  if [ ! -d "$HOME/.oh-my-zsh/custom/plugins/zsh-autosuggestions" ]; then
-      git clone https://github.com/zsh-users/zsh-autosuggestions ${ZSH_CUSTOM:-$HOME/.oh-my-zsh/custom}/plugins/zsh-autosuggestions 
-  else
-      echo "${INFO} Directory zsh-autosuggestions already exists. Cloning Skipped." 2>&1 | tee -a "$LOG"
-  fi
-
-  if [ ! -d "$HOME/.oh-my-zsh/custom/plugins/zsh-syntax-highlighting" ]; then
-      git clone https://github.com/zsh-users/zsh-syntax-highlighting.git ${ZSH_CUSTOM:-$HOME/.oh-my-zsh/custom}/plugins/zsh-syntax-highlighting 
-  else
-      echo "${INFO} Directory zsh-syntax-highlighting already exists. Cloning Skipped." 2>&1 | tee -a "$LOG"
-  fi
-  
-  # Check if ~/.zshrc and .zprofile exists, create a backup, and copy the new configuration
-  if [ -f "$HOME/.zshrc" ]; then
-      cp -b "$HOME/.zshrc" "$HOME/.zshrc-backup" || true
-  fi
-
-  if [ -f "$HOME/.zprofile" ]; then
-      cp -b "$HOME/.zprofile" "$HOME/.zprofile-backup" || true
-  fi
-  
-  # Copying the preconfigured zsh themes and profile
-  cp -r 'assets/.zshrc' ~/
-  cp -r 'assets/.zprofile' ~/
-
-  # Check if the current shell is zsh
   current_shell=$(basename "$SHELL")
   if [ "$current_shell" != "zsh" ]; then
     printf "${NOTE} Changing default shell to ${MAGENTA}zsh${RESET}..."
@@ -92,13 +70,10 @@ if command -v zsh >/dev/null; then
   else
     echo "${NOTE} Your shell is already set to ${MAGENTA}zsh${RESET}."
   fi
-
+else
+  echo "${ERROR} zsh not found after install. Check $LOG." 2>&1 | tee -a "$LOG"
 fi
 
-# copy additional oh-my-zsh themes from assets
-if [ -d "$HOME/.oh-my-zsh/themes" ]; then
-    cp -r assets/add_zsh_theme/* ~/.oh-my-zsh/themes >> "$LOG" 2>&1
-fi
+echo "${INFO} Zsh config (~/.zshrc) is provided by my dotfiles — see dotfiles-main.sh" 2>&1 | tee -a "$LOG"
 
 printf "\n%.0s" {1..2}
-
