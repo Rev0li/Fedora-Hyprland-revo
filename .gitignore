@@ -1,3 +1,8 @@
 
 # Snapshots locaux de backup.sh (Rev0li)
 backups/
+
+# Contenu téléchargé pendant l'installation (non versionné)
+GTK-themes-icons/
+Hyprland-Dots/
+Install-Logs/
