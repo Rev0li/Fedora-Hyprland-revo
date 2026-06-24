@@ -41,9 +41,23 @@ fi
 echo "${OK} Root Btrfs détecté." | tee -a "$LOG"
 
 # ── Packages ─────────────────────────────────────────────────────────────────
-for pkg in snapper python3-dnf-plugin-snapper grub-btrfs; do
+for pkg in snapper python3-dnf-plugin-snapper; do
     install_package "$pkg"
 done
+
+# grub-btrfs n'est pas dans les repos Fedora standard → COPR kylegospo/grub-btrfs
+if rpm -q grub-btrfs &>/dev/null; then
+    echo "${INFO} ${MAGENTA}grub-btrfs${RESET} is already installed. Skipping..."
+else
+    echo "${NOTE} grub-btrfs absent des repos standard — activation du COPR kylegospo/grub-btrfs..." | tee -a "$LOG"
+    if sudo dnf copr enable -y kylegospo/grub-btrfs 2>&1 | tee -a "$LOG"; then
+        install_package "grub-btrfs"
+    else
+        echo "${WARN} Impossible d'activer le COPR grub-btrfs — rollback GRUB non disponible." | tee -a "$LOG"
+        echo "${NOTE} Pour l'installer manuellement :" | tee -a "$LOG"
+        echo "   sudo dnf copr enable kylegospo/grub-btrfs && sudo dnf install -y grub-btrfs" | tee -a "$LOG"
+    fi
+fi
 
 # ── Config snapper : root ────────────────────────────────────────────────────
 if snapper list-configs 2>/dev/null | grep -q '^root '; then
