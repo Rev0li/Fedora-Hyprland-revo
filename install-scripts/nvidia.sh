@@ -4,7 +4,6 @@
 
 nvidia_pkg=(
   akmod-nvidia
-  xorg-x11-drv-nvidia-cuda
   libva
   libva-nvidia-driver
 )
@@ -37,6 +36,14 @@ printf "${YELLOW} Installing ${SKY_BLUE}Nvidia Packages${RESET}...\n"
   for NVIDIA in "${nvidia_pkg[@]}"; do
   install_package "$NVIDIA"
 done
+
+# Install the versioned cuda package (provides nvidia-smi) matching the installed akmod variant
+NVIDIA_VARIANT=$(rpm -qa 'akmod-nvidia*' 2>/dev/null | grep -oP '(?<=akmod-nvidia-)\w+' | head -1)
+if [ -n "$NVIDIA_VARIANT" ]; then
+  install_package "xorg-x11-drv-nvidia-${NVIDIA_VARIANT}-cuda"
+else
+  install_package "xorg-x11-drv-nvidia-cuda"
+fi
 
 printf "${INFO} adding nvidia options to ${YELLOW}/etc/default/grub${RESET} ..."
 

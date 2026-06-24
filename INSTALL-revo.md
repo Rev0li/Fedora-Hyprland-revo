@@ -181,7 +181,107 @@ wc -l backups/latest/dnf-userinstalled.txt   # nb de paquets capturés
 
 ---
 
+## Phase 5a — Snapshots Btrfs locaux (snapper)
+
+Protège contre les mises à jour cassantes (`dnf update`, fausse manip…).
+Rollback instantané depuis le menu GRUB, sans réinstaller.
+
+```bash
+./install-scripts/snapper.sh
+# ou, si tu repasses par install.sh :
+# preset.sh contient déjà snapper="ON"
+```
+
+**Ce qui est installé** :
+
+| Composant | Rôle |
+|-----------|------|
+| `snapper` | gestion des snapshots Btrfs |
+| `python3-dnf-plugin-snapper` | snapshot automatique avant/après chaque `dnf` |
+| `grub-btrfs` | snapshots visibles dans le menu GRUB au boot |
+
+**Rétention automatique** : 5 horaires · 7 quotidiens · 4 hebdo · 3 mensuels (root + home).
+
+**✅ Vérif** :
+
+```bash
+snapper list                          # doit lister au moins une config (root, home)
+systemctl status snapper-timeline.timer
+```
+
+**Commandes du quotidien** :
+
+```bash
+snapper -c root create -d "avant maj nvidia"   # snapshot manuel
+snapper list                                    # voir tous les snapshots
+snapper -c root diff 3 5                       # diff entre snapshots n°3 et 5
+snapper -c root undochange 3..5                # annuler les changements 3→5
+```
+
+**Rollback depuis GRUB** : au boot, dans le menu GRUB → *Fedora Linux snapshots* →
+choisir un snapshot → booter dedans → si OK, le définir comme défaut.
+
+---
+
+## Phase 5b — Backup incrémental vers le NAS
+
+Protège contre la **perte du disque** ou le **changement de machine**.
+Utilise `btrfs send` : premier envoi complet, suivants incrémentaux (~10× plus petits).
+
+### 1. Configurer le chemin NAS
+
+Ouvre `nas-backup.sh` et ajuste si besoin :
+
+```bash
+NAS_DEST_PATH="/volume1/backup-rev0/fedora_backup"  # chemin sur nas-songsurf
+```
+
+Créer le dossier sur le NAS si absent :
+
+```bash
+ssh nas-songsurf "mkdir -p /volume1/backup-rev0/fedora_backup"
+```
+
+### 2. Premier backup (envoi complet)
+
+```bash
+./nas-backup.sh              # root + home
+./nas-backup.sh --root-only  # root uniquement (plus rapide)
+```
+
+Le premier envoi est **complet** — prévois de la bande passante (taille du subvolume root).
+Les suivants seront **incrémentaux** (seulement le diff depuis le dernier envoi).
+
+**✅ Vérif** :
+
+```bash
+ssh nas-songsurf "ls /volume1/backup-rev0/fedora_backup/"
+# doit lister : root-STAMP_full.btrfs.zst  home-STAMP_full.btrfs.zst  backup.log
+ssh nas-songsurf "cat /volume1/backup-rev0/fedora_backup/backup.log"
+```
+
+### 3. Automatiser (optionnel)
+
+```bash
+# Backup NAS chaque dimanche à 2h du matin
+(crontab -l 2>/dev/null; echo "0 2 * * 0 /home/rev0li/Fedora-Hyprland-revo/nas-backup.sh") | crontab -
+```
+
+---
+
 ## En cas de pépin — restaurer
+
+### Rollback local (snapper — le plus rapide)
+
+Depuis le **menu GRUB** au boot : *Fedora Linux snapshots* → choisir le snapshot voulu.
+
+Ou depuis un système en marche :
+
+```bash
+snapper -c root undochange N..0   # revenir de l'état N à l'état 0 (actuel)
+```
+
+### Restauration paquets/configs (restore.sh)
 
 Sur une nouvelle machine, ou après avoir cassé quelque chose :
 
@@ -195,6 +295,28 @@ Sur une nouvelle machine, ou après avoir cassé quelque chose :
 Ordre rejoué : **COPR → DNF → Flatpak → configs** (l'existant est sauvegardé dans
 `~/.config/.restore-backup_<date>/` avant écrasement). Idempotent.
 
+### Restauration NAS (perte disque / nouvelle machine)
+
+Après avoir installé Fedora + Btrfs sur la nouvelle machine :
+
+```bash
+# 1. Monter un subvolume vide pour recevoir le stream
+sudo mount /dev/sdX /mnt/restore
+
+# 2. Appliquer le backup complet
+ssh nas-songsurf "cat /volume1/backup-rev0/fedora_backup/root-STAMP_full.btrfs.zst" \
+  | zstd -d | sudo btrfs receive /mnt/restore/
+
+# 3. Appliquer les incrémentaux dans l'ordre chronologique
+ssh nas-songsurf "cat /volume1/backup-rev0/fedora_backup/root-STAMP2_inc.btrfs.zst" \
+  | zstd -d | sudo btrfs receive /mnt/restore/
+
+# 4. Définir le subvolume restauré comme défaut, modifier /etc/fstab, reboot
+sudo btrfs subvolume set-default <ID> /mnt/restore
+```
+
+> L'ordre des fichiers à appliquer est dans `/volume1/backup-rev0/fedora_backup/backup.log` sur le NAS.
+
 ---
 
 ## Schéma mental à retenir
@@ -204,9 +326,11 @@ Ordre rejoué : **COPR → DNF → Flatpak → configs** (l'existant est sauvega
 | **Système** (paquets, NVIDIA) | `install.sh` / `restore.sh` | éditer `preset.sh`, relancer |
 | **Desktop** (hypr, waybar…) | KooL Hyprland-Dots | via `~/.config` (capturé par `backup.sh`) |
 | **Shell/terminal/éditeur** | dotfiles, branche `fedora_dotfile` | éditer `~/dotfiles`, commit/push sur `fedora_dotfile` |
+| **Snapshots locaux** | snapper + grub-btrfs | `snapper list` / rollback GRUB |
+| **Backup NAS** | `nas-backup.sh` | `btrfs send` incrémental vers `nas-songsurf` |
 
-Les trois couches sont **découplées** : tu peux refaire l'OS sans perdre tes dotfiles
-(ils sont sur git), et changer tes dotfiles sans toucher au desktop.
+Les couches sont **découplées** : tu peux refaire l'OS sans perdre tes dotfiles
+(sur git), snapshotter sans toucher au desktop, et sauvegarder vers le NAS indépendamment.
 
 ---
 
@@ -217,9 +341,16 @@ Les trois couches sont **découplées** : tu peux refaire l'OS sans perdre tes d
 sudo dnf upgrade --refresh -y && sudo dnf install -y git
 git clone https://github.com/Rev0li/Fedora-Hyprland-revo.git
 cd Fedora-Hyprland-revo && git checkout revo/dotfiles-integration
-# (régler nvidia="ON" dans preset.sh)
+# (régler nvidia="ON" dans preset.sh — snapper="ON" est déjà activé)
 ./install.sh --preset preset.sh
 sudo reboot
 # après login :
 ./check-install.sh && ./backup.sh
+
+# Snapshots Btrfs locaux
+snapper list
+snapper -c root create -d "note"
+
+# Backup NAS
+./nas-backup.sh
 ```

@@ -113,6 +113,7 @@ rog="OFF"
 dots="OFF"
 input_group="OFF"
 nvidia="OFF"
+snapper="OFF"
 
 # Function to load preset file
 load_preset() {
@@ -208,6 +209,7 @@ options_command+=(
     "pokemon" "Add Pokemon color scripts to your terminal?" "OFF"
     "rog" "Are you installing on Asus ROG laptops?" "OFF"
     "dots" "Download and install pre-configured KooL Hyprland dotfiles?" "OFF"
+    "snapper" "Configure Btrfs snapshots + GRUB rollback (snapper)?" "OFF"
 )
 
 # Capture the selected options before the while loop starts
@@ -360,6 +362,10 @@ for option in "${options[@]}"; do
         dots)
             echo "${INFO} Installing pre-configured ${SKY_BLUE}KooL Hyprland dotfiles...${RESET}" | tee -a "$LOG"
             execute_script "dotfiles-main.sh"
+            ;;
+        snapper)
+            echo "${INFO} Configuring ${SKY_BLUE}Btrfs snapshots (snapper + grub-btrfs)...${RESET}" | tee -a "$LOG"
+            execute_script "snapper.sh"
             ;;
         *)
             echo "Unknown option: $option" | tee -a "$LOG"

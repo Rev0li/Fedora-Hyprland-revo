@@ -45,3 +45,7 @@ rog="OFF"
 
 ###-Download and Add pre-configured Hyprland dotfiles?
 dots="ON"
+
+### Snapshots Btrfs locaux (snapper) + rollback depuis GRUB
+### Requiert un filesystem root en Btrfs (vérifié automatiquement)
+snapper="ON"
