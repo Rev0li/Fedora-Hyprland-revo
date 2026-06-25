@@ -145,6 +145,16 @@ for SUBVOL in "${SUBVOLS[@]}"; do
             sudo btrfs subvolume delete "$BTRFS_TOP/$PARENT_NAME"
             log "Ancien parent supprimé : $PARENT_NAME"
         fi
+        # Supprimer l'ancienne sauvegarde NAS (seulement si on vient d'envoyer un incrémental)
+        if [ -n "$PARENT_NAME" ]; then
+            for old_suffix in _full _inc; do
+                old_nas_file="${NAS_DEST_PATH}/${PARENT_NAME}${old_suffix}.btrfs.zst"
+                if ssh "$NAS_HOST" "[ -f '$old_nas_file' ]" 2>/dev/null; then
+                    ssh "$NAS_HOST" "rm -f '$old_nas_file'"
+                    log "Ancienne sauvegarde NAS supprimée : ${PARENT_NAME}${old_suffix}.btrfs.zst"
+                fi
+            done
+        fi
         # Mémoriser le nouveau parent
         echo "$SNAP_NAME" > "$PARENT_FILE"
         ok "Parent mis à jour → $SNAP_NAME"
