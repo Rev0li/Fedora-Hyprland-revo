@@ -1,0 +1,13 @@
+[Unit]
+Description=Rappel interactif de sauvegarde NAS (incrémental)
+Documentation=file:/home/rev0li/dev/Fedora-Hyprland-revo/restore.md
+After=graphical-session.target
+
+[Service]
+Type=oneshot
+# Envoie une notification swaync avec bouton « Lancer » ; au clic, ouvre un
+# terminal kitty qui lance nas-backup.sh (sudo interactif → password + YubiKey).
+# Ne fait RIEN en tâche de fond : pas de NOPASSWD, pas d'envoi automatique.
+ExecStart=/home/rev0li/dev/Fedora-Hyprland-revo/nas-backup-notify.sh
+# > au timeout interne (4h) du helper, pour le laisser finir proprement.
+TimeoutStartSec=5h

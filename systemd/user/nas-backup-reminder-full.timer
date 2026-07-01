@@ -1,0 +1,12 @@
+[Unit]
+Description=Rappel mensuel de sauvegarde NAS complète (--full)
+
+[Timer]
+# Le 1er de chaque mois à 20:30 — un full borne la longueur de la chaîne
+# d'incréments et l'espace occupé sur le NAS.
+OnCalendar=*-*-01 20:30:00
+Persistent=true
+RandomizedDelaySec=20min
+
+[Install]
+WantedBy=timers.target

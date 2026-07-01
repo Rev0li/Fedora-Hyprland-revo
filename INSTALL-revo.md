@@ -260,43 +260,47 @@ ssh nas-songsurf "ls /volume1/backup-rev0/fedora_backup/"
 ssh nas-songsurf "cat /volume1/backup-rev0/fedora_backup/backup.log"
 ```
 
-### 3. Automatiser (recommandé) — timers systemd
+### 3. Automatiser le *rappel* (recommandé) — notification interactive
 
-Un installeur dédié met en place deux timers + le `sudo` non-interactif requis
-(le script tourne en tant que `rev0li` mais a besoin de root pour `btrfs`/`mount`/`tar`) :
+Choix assumé : **pas de backup en tâche de fond.** Un backup NAS envoie `/home`
+(secrets compris) hors machine et fait de grosses opérations root ; il doit
+rester un acte conscient, authentifié (mot de passe sudo + touch YubiKey). On
+automatise donc le **rappel**, pas l'exécution.
 
 ```bash
-./install-scripts/nas-backup-timer.sh
+./install-scripts/nas-backup-reminder.sh   # aucun sudo : timers systemd --user
 ```
 
-Ce qu'il installe (fichiers versionnés dans `systemd/`) :
+Ce qu'il installe (unités versionnées dans `systemd/user/`) :
 
-| Timer | Quand | Action |
+| Timer (`--user`) | Quand | Action |
 |---|---|---|
-| `nas-backup.timer` | tous les jours 02:00 | envoi **incrémental** (root+home+boot+efi) |
-| `nas-backup-full.timer` | le 1er du mois 03:00 | envoi **`--full`** — purge la chaîne du mois écoulé |
-| `/etc/sudoers.d/nas-backup` | — | `NOPASSWD` ciblé pour le backup non-interactif |
+| `nas-backup-reminder.timer` | tous les jours 20:00 | **notif swaync** « Sauvegarde due » + bouton → incrémental |
+| `nas-backup-reminder-full.timer` | le 1er du mois 20:30 | **notif** « Sauvegarde complète » + bouton → `--full` |
 
-> ⚠️ Le drop-in sudoers accorde un `NOPASSWD` sur `tar`/`btrfs`/`mount` : en
-> pratique ≈ root sans mot de passe pour `rev0li`. Acceptable sur ce poste
-> mono-utilisateur ; lis `systemd/nas-backup.sudoers` avant d'installer.
+Au clic sur **« Lancer »**, `nas-backup-notify.sh` ouvre un terminal kitty qui
+exécute `nas-backup.sh` : `sudo` y demande **mot de passe + touch YubiKey**
+(ta config `pam_u2f` existante). Rien ne part vers le NAS sans ce geste.
 
-`Persistent=true` : un run manqué (machine éteinte à l'heure prévue) se
-rattrape au démarrage suivant. Un verrou `flock` empêche que le quotidien et le
-mensuel se chevauchent.
+- **Pas de nag inutile** : le rappel quotidien se tait si une sauvegarde a eu
+  lieu il y a moins de 20 h.
+- `Persistent=true` : un rappel manqué (session fermée à l'heure prévue)
+  s'affiche à la prochaine ouverture de session.
+- Les snapshots **snapper locaux** restent, eux, automatiques (Phase 5a) : ils
+  couvrent l'« oups » en continu, sans réseau ni secret qui sort.
 
 **✅ Vérif** :
 
 ```bash
-systemctl list-timers 'nas-backup*'          # prochaines exécutions
-systemctl start nas-backup.service           # test immédiat (facultatif)
-journalctl -u nas-backup.service -f          # suivre les logs
+systemctl --user list-timers 'nas-backup*'                          # prochains rappels
+systemctl --user start --no-block nas-backup-reminder-full.service  # tester la notif tout de suite
+./nas-backup.sh                                                     # ou lancer un backup à la main
 ```
 
-> **Restauration** : les unités et le drop-in vivent dans `/etc` (subvolume
-> `root`), donc un `restore.md` complet les remet en place tels quels — rien à
-> refaire. En cas de doute, relancer `./install-scripts/nas-backup-timer.sh`
-> est sans risque (idempotent) et re-valide tout.
+> **Restauration** : les unités vivent dans `~/.config/systemd/user`
+> (subvolume `home`), donc un `restore.md` complet les remet en place. En cas de
+> doute, relancer `./install-scripts/nas-backup-reminder.sh` (idempotent, sans
+> sudo) réarme tout.
 
 ---
 

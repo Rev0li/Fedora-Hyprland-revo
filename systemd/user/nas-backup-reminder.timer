@@ -1,0 +1,14 @@
+[Unit]
+Description=Rappel quotidien de sauvegarde NAS (incrémental)
+
+[Timer]
+# Chaque jour à 20:00 (heure où tu es probablement devant la machine, puisque
+# la sauvegarde est interactive). Persistent : si la session n'était pas ouverte
+# à l'heure prévue, le rappel s'affiche à la prochaine ouverture de session.
+# Le helper se tait de lui-même si une sauvegarde a eu lieu il y a moins de 20 h.
+OnCalendar=*-*-* 20:00:00
+Persistent=true
+RandomizedDelaySec=20min
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,9 @@
+[Unit]
+Description=Rappel interactif de sauvegarde NAS COMPLÈTE (mensuelle)
+Documentation=file:/home/rev0li/dev/Fedora-Hyprland-revo/restore.md
+After=graphical-session.target
+
+[Service]
+Type=oneshot
+ExecStart=/home/rev0li/dev/Fedora-Hyprland-revo/nas-backup-notify.sh --full
+TimeoutStartSec=5h
