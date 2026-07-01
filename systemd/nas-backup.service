@@ -1,0 +1,22 @@
+[Unit]
+Description=Sauvegarde Btrfs incrémentale vers le NAS (root+home+boot+efi)
+Documentation=file:/home/rev0li/dev/Fedora-Hyprland-revo/restore.md
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=rev0li
+Group=rev0li
+# Le script REFUSE de tourner en root : il s'exécute en tant que rev0li et
+# appelle sudo en interne (mount, btrfs, tar…). Le NOPASSWD nécessaire est
+# dans /etc/sudoers.d/nas-backup (installé par install-scripts/nas-backup-timer.sh).
+# flock -w : empêche que le run quotidien et le run mensuel (--full) se
+# chevauchent (ex. rattrapage Persistent au boot après une coupure).
+RuntimeDirectory=nas-backup
+ExecStart=/usr/bin/flock -w 3600 /run/nas-backup/backup.lock /home/rev0li/dev/Fedora-Hyprland-revo/nas-backup.sh
+# Un envoi complet peut être long ; timeout large mais fini (évite un blocage éternel).
+TimeoutStartSec=4h
+Nice=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=6

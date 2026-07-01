@@ -1,0 +1,19 @@
+[Unit]
+Description=Sauvegarde Btrfs COMPLETE (--full) vers le NAS — purge l'ancienne chaîne
+Documentation=file:/home/rev0li/dev/Fedora-Hyprland-revo/restore.md
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=rev0li
+Group=rev0li
+# Même modèle que nas-backup.service, mais force un full (borne la longueur de
+# la chaîne d'incréments et l'espace NAS). Partage le même verrou flock que le
+# run quotidien pour éviter tout chevauchement.
+RuntimeDirectory=nas-backup
+ExecStart=/usr/bin/flock -w 3600 /run/nas-backup/backup.lock /home/rev0li/dev/Fedora-Hyprland-revo/nas-backup.sh --full
+TimeoutStartSec=4h
+Nice=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=6

@@ -260,12 +260,43 @@ ssh nas-songsurf "ls /volume1/backup-rev0/fedora_backup/"
 ssh nas-songsurf "cat /volume1/backup-rev0/fedora_backup/backup.log"
 ```
 
-### 3. Automatiser (optionnel)
+### 3. Automatiser (recommandé) — timers systemd
+
+Un installeur dédié met en place deux timers + le `sudo` non-interactif requis
+(le script tourne en tant que `rev0li` mais a besoin de root pour `btrfs`/`mount`/`tar`) :
 
 ```bash
-# Backup NAS chaque dimanche à 2h du matin
-(crontab -l 2>/dev/null; echo "0 2 * * 0 /home/rev0li/Fedora-Hyprland-revo/nas-backup.sh") | crontab -
+./install-scripts/nas-backup-timer.sh
 ```
+
+Ce qu'il installe (fichiers versionnés dans `systemd/`) :
+
+| Timer | Quand | Action |
+|---|---|---|
+| `nas-backup.timer` | tous les jours 02:00 | envoi **incrémental** (root+home+boot+efi) |
+| `nas-backup-full.timer` | le 1er du mois 03:00 | envoi **`--full`** — purge la chaîne du mois écoulé |
+| `/etc/sudoers.d/nas-backup` | — | `NOPASSWD` ciblé pour le backup non-interactif |
+
+> ⚠️ Le drop-in sudoers accorde un `NOPASSWD` sur `tar`/`btrfs`/`mount` : en
+> pratique ≈ root sans mot de passe pour `rev0li`. Acceptable sur ce poste
+> mono-utilisateur ; lis `systemd/nas-backup.sudoers` avant d'installer.
+
+`Persistent=true` : un run manqué (machine éteinte à l'heure prévue) se
+rattrape au démarrage suivant. Un verrou `flock` empêche que le quotidien et le
+mensuel se chevauchent.
+
+**✅ Vérif** :
+
+```bash
+systemctl list-timers 'nas-backup*'          # prochaines exécutions
+systemctl start nas-backup.service           # test immédiat (facultatif)
+journalctl -u nas-backup.service -f          # suivre les logs
+```
+
+> **Restauration** : les unités et le drop-in vivent dans `/etc` (subvolume
+> `root`), donc un `restore.md` complet les remet en place tels quels — rien à
+> refaire. En cas de doute, relancer `./install-scripts/nas-backup-timer.sh`
+> est sans risque (idempotent) et re-valide tout.
 
 ---
 
