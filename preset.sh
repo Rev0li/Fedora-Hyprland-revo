@@ -20,10 +20,9 @@ thunar="ON"
 ### Adding user to the 'input' group might be necessary for waybar keyboard-state functionality
 input_group="ON"
 
-### Desktop overview Demo Link in README
-### Desktop overview Demo Link in README
-### Install AGS (aylur's GTK shell) v1 for Desktop-Like Overview?" 
-ags="ON"
+### Install quickshell for Desktop-Like Overview?
+### (remplace l'ancienne option ags — dépend de la dispo COPR pour ta version de Fedora)
+quickshell="ON"
 
 ###-Install & configure SDDM log-in Manager
 sddm="ON"

@@ -34,6 +34,37 @@ if [[ $EUID -eq 0 ]]; then
     exit 1
 fi
 
+# ── Arguments : --preset <file> [--unattended] (Rev0li) ──────────────────────
+# --preset      : les valeurs du preset PRÉ-COCHENT la checklist whiptail
+# --unattended  : aucune question — la sélection vient du preset (requis)
+PRESET_FILE=""
+UNATTENDED=0
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --preset)
+            if [[ -z "${2:-}" ]]; then
+                echo "${ERROR} --preset requires a file argument." | tee -a "$LOG"
+                exit 1
+            fi
+            PRESET_FILE="$2"
+            shift 2
+            ;;
+        --unattended)
+            UNATTENDED=1
+            shift
+            ;;
+        *)
+            echo "${ERROR} Unknown option: $1 (usage: ./install.sh [--preset preset.sh] [--unattended])" | tee -a "$LOG"
+            exit 1
+            ;;
+    esac
+done
+
+if [[ "$UNATTENDED" -eq 1 && -z "$PRESET_FILE" ]]; then
+    echo "${ERROR} --unattended requires --preset <file> (otherwise nothing would be selected)." | tee -a "$LOG"
+    exit 1
+fi
+
 # install whiptails if detected not installed. Necessary for this version
 if ! command -v whiptail >/dev/null; then
     echo "${NOTE} - whiptail is not installed. Installing..." | tee -a "$LOG"
@@ -52,6 +83,7 @@ echo -e "\e[35m
 printf "\n%.0s" {1..1} 
 
 # Welcome message using whiptail (for displaying information)
+if [ "$UNATTENDED" -eq 0 ]; then
 whiptail --title "KooL Fedora-Hyprland (2025) Install Script" \
     --msgbox "Welcome to KooL Fedora-Hyprland (2025) Install Script!!!\n\n\
 ATTENTION: Run a full system update and Reboot first !!! (Highly Recommended)\n\n\
@@ -65,6 +97,7 @@ if ! whiptail --title "Proceed with Installation?" \
     echo "❌ ${INFO} You 🫵 chose ${YELLOW}NOT${RESET} to proceed. ${YELLOW}Exiting...${RESET}" | tee -a "$LOG"
     echo -e "\n"
     exit 1
+fi
 fi
 
 echo "👌 ${OK} 🇵🇭 ${MAGENTA}KooL..${RESET} ${SKY_BLUE}lets continue with the installation...${RESET}" | tee -a "$LOG"
@@ -125,9 +158,10 @@ load_preset() {
     fi
 }
 
-# Check if --preset argument is passed
-if [[ "$1" == "--preset" && -n "$2" ]]; then
-    load_preset "$2"
+# Load preset if provided — its ON/OFF values override the defaults above and
+# pre-tick the whiptail checklist (or drive the whole selection in --unattended)
+if [ -n "$PRESET_FILE" ]; then
+    load_preset "$PRESET_FILE"
 fi
 
 # List of services to check for active login managers
@@ -152,16 +186,22 @@ check_services_running() {
 if check_services_running; then
     active_list=$(printf "%s\n" "${active_services[@]}")
 
-    # Display the active login manager(s) in the whiptail message box
-    whiptail --title "Active non-SDDM login manager(s) detected" \
-        --msgbox "The following login manager(s) are active:\n\n$active_list\n\nIf you want to install SDDM and SDDM theme, stop and disable the active services above, reboot before running this script\n\nYour option to install SDDM and SDDM theme has now been removed\n\n- Ja " 23 80
+    if [ "$UNATTENDED" -eq 0 ]; then
+        # Display the active login manager(s) in the whiptail message box
+        whiptail --title "Active non-SDDM login manager(s) detected" \
+            --msgbox "The following login manager(s) are active:\n\n$active_list\n\nIf you want to install SDDM and SDDM theme, stop and disable the active services above, reboot before running this script\n\nYour option to install SDDM and SDDM theme has now been removed\n\n- Ja " 23 80
+    else
+        echo "${WARN} Active login manager(s) detected ($active_list) — sddm/sddm_theme will be skipped." | tee -a "$LOG"
+    fi
 fi
 
 # Check if NVIDIA GPU is detected
 nvidia_detected=false
 if lspci | grep -i "nvidia" &> /dev/null; then
     nvidia_detected=true
-    whiptail --title "NVIDIA GPU Detected" --msgbox "NVIDIA GPU detected in your system.\n\nNOTE: The script will install akmod-nvidia,  xorg-x11-drv-nvidia-cuda, etc if you choose to configure." 12 60
+    if [ "$UNATTENDED" -eq 0 ]; then
+        whiptail --title "NVIDIA GPU Detected" --msgbox "NVIDIA GPU detected in your system.\n\nNOTE: The script will install akmod-nvidia,  xorg-x11-drv-nvidia-cuda, etc if you choose to configure." 12 60
+    fi
 fi
 
 # Initialize the options array for whiptail checklist
@@ -169,10 +209,10 @@ options_command=(
     whiptail --title "Select Options" --checklist "Choose options to install or configure\nNOTE: 'SPACEBAR' to select & 'TAB' key to change selection" 28 85 20
 )
 
-# Add NVIDIA options if detected
+# Add NVIDIA options if detected (initial state comes from the preset)
 if [ "$nvidia_detected" == "true" ]; then
     options_command+=(
-        "nvidia" "Do you want script to configure NVIDIA GPU?" "OFF"
+        "nvidia" "Do you want script to configure NVIDIA GPU?" "$nvidia"
     )
 fi
 
@@ -180,38 +220,60 @@ fi
 input_group_detected=false
 if ! groups "$(whoami)" | grep -q '\binput\b'; then
     input_group_detected=true
-    whiptail --title "Input Group" --msgbox "You are not currently in the input group.\n\nAdding you to the input group might be necessary for the Waybar keyboard-state functionality." 12 60
+    if [ "$UNATTENDED" -eq 0 ]; then
+        whiptail --title "Input Group" --msgbox "You are not currently in the input group.\n\nAdding you to the input group might be necessary for the Waybar keyboard-state functionality." 12 60
+    fi
 fi
 
 # Add 'input_group' option if necessary
 if [ "$input_group_detected" == "true" ]; then
     options_command+=(
-        "input_group" "Add your USER to input group for some waybar functionality?" "OFF"
+        "input_group" "Add your USER to input group for some waybar functionality?" "$input_group"
     )
 fi
 
 # Conditionally add SDDM and SDDM theme options if no active login manager is found
 if ! check_services_running; then
     options_command+=(
-        "sddm" "Install & configure SDDM login manager?" "OFF"
-        "sddm_theme" "Download & Install Additional SDDM theme?" "OFF"
+        "sddm" "Install & configure SDDM login manager?" "$sddm"
+        "sddm_theme" "Download & Install Additional SDDM theme?" "$sddm_theme"
     )
 fi
 
-# Add the remaining static options
+# Add the remaining static options (initial state comes from the preset)
 options_command+=(
-    "gtk_themes" "Install GTK themes (required for Dark/Light function)" "OFF"
-    "bluetooth" "Do you want script to configure Bluetooth?" "OFF"
-    "thunar" "Do you want Thunar file manager to be installed?" "OFF"
-    "quickshell" "Install quickshell for Desktop-Like Overview (availability depends on COPR support for your Fedora version)" "OFF"
-    "xdph" "Install XDG-DESKTOP-PORTAL-HYPRLAND (for screen share)?" "OFF"
-    "zsh" "Install zsh shell with Oh-My-Zsh?" "OFF"
-    "pokemon" "Add Pokemon color scripts to your terminal?" "OFF"
-    "rog" "Are you installing on Asus ROG laptops?" "OFF"
-    "dots" "Download and install pre-configured KooL Hyprland dotfiles?" "OFF"
-    "snapper" "Configure Btrfs snapshots + GRUB rollback (snapper)?" "OFF"
+    "gtk_themes" "Install GTK themes (required for Dark/Light function)" "$gtk_themes"
+    "bluetooth" "Do you want script to configure Bluetooth?" "$bluetooth"
+    "thunar" "Do you want Thunar file manager to be installed?" "$thunar"
+    "quickshell" "Install quickshell for Desktop-Like Overview (availability depends on COPR support for your Fedora version)" "$quickshell"
+    "xdph" "Install XDG-DESKTOP-PORTAL-HYPRLAND (for screen share)?" "$xdph"
+    "zsh" "Install zsh shell with Oh-My-Zsh?" "$zsh"
+    "pokemon" "Add Pokemon color scripts to your terminal?" "$pokemon"
+    "rog" "Are you installing on Asus ROG laptops?" "$rog"
+    "dots" "Download and install pre-configured KooL Hyprland dotfiles?" "$dots"
+    "snapper" "Configure Btrfs snapshots + GRUB rollback (snapper)?" "$snapper"
 )
 
+# Unattended : la sélection vient directement du preset, avec les mêmes
+# garde-fous que la checklist (nvidia si détecté, input_group si nécessaire,
+# sddm seulement si aucun autre login manager n'est actif).
+if [ "$UNATTENDED" -eq 1 ]; then
+    selected_options=""
+    for opt in nvidia input_group sddm sddm_theme gtk_themes bluetooth thunar quickshell xdph zsh pokemon rog dots snapper; do
+        [ "${!opt:-OFF}" == "ON" ] && selected_options+="$opt "
+    done
+    [ "$nvidia_detected" != "true" ] && selected_options=${selected_options//nvidia /}
+    [ "$input_group_detected" != "true" ] && selected_options=${selected_options//input_group /}
+    if check_services_running; then
+        selected_options=${selected_options//sddm_theme /}
+        selected_options=${selected_options//sddm /}
+    fi
+    if [ -z "$selected_options" ]; then
+        echo "${ERROR} Preset selects nothing (all options OFF?) — aborting." | tee -a "$LOG"
+        exit 1
+    fi
+    echo "${INFO} Unattended install with options: ${YELLOW}${selected_options}${RESET}" | tee -a "$LOG"
+else
 # Capture the selected options before the while loop starts
 while true; do
     selected_options=$("${options_command[@]}" 3>&1 1>&2 2>&3)
@@ -274,8 +336,9 @@ while true; do
     fi
 
     echo "👌 ${OK} You confirmed your choices. Proceeding with ${SKY_BLUE}KooL 🇵🇭 Hyprland Installation...${RESET}" | tee -a "$LOG"
-    break  
+    break
 done
+fi
 
 printf "\n%.0s" {1..1}
 
@@ -410,6 +473,9 @@ if rpm -q hyprland &> /dev/null || rpm -q hyprland-git &> /dev/null; then
     printf "\n${NOTE} You can start Hyprland by typing ${SKY_BLUE}Hyprland${RESET} (IF SDDM is not installed) (note the capital H!).\n"
     printf "\n${NOTE} However, it is ${YELLOW}highly recommended to reboot${RESET} your system.\n\n"
 
+    if [ "$UNATTENDED" -eq 1 ]; then
+        printf "\n${NOTE} Unattended mode — skipping reboot prompt. ${YELLOW}Reboot is highly recommended${RESET} (NVIDIA/Hyprland).\n"
+    else
     while true; do
         echo -n "${CAT} Would you like to reboot now? (y/n): "
         read HYP
@@ -432,6 +498,7 @@ if rpm -q hyprland &> /dev/null || rpm -q hyprland-git &> /dev/null; then
             echo "${WARN} Invalid response. Please answer with 'y' or 'n'."
         fi
     done
+    fi
 else
     # Print error message if neither package is installed
     printf "\n${WARN} Hyprland is NOT installed. Please check 00_CHECK-time_installed.log and other files in the Install-Logs/ directory..."
