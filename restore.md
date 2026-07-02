@@ -19,9 +19,15 @@ NAS : `nas-songsurf:/volume1/backup-rev0/fedora_backup/`
 | `/home` (subvol `home`) | `btrfs send/receive` | `home-STAMP_full.btrfs.zst` + `home-STAMP_inc.btrfs.zst` (0..N) | Idem |
 | `/boot` (ext4) | `tar --selinux --acls --xattrs` | `boot-STAMP.tar.zst` | 1 seule version (toujours full) |
 | `/boot/efi` (vfat) | `tar` | `boot-efi-STAMP.tar.zst` | 1 seule version (toujours full) |
+| Identité système (GPT, blkid, fstab, efibootmgr, subvols) | `tar` | `sysinfo-STAMP.tar.zst` | 1 seule version |
 
-`backup.log` sur le NAS liste l'historique des runs dans l'ordre chronologique —
-c'est la référence pour savoir quels fichiers `_inc` appliquer et dans quel ordre.
+Chaque fichier a un sidecar `<fichier>.sha256` (vérifié à l'upload, re-vérifiable
+à tout moment : `ssh nas-songsurf "cd <dossier> && sha256sum -c *.sha256"`).
+`backup.log` sur le NAS liste l'historique des runs dans l'ordre chronologique.
+
+> **Raccourci** : `nas-restore.sh` automatise l'inventaire, la vérification
+> sha256 et le rejeu de chaîne (§4 et §7). Les commandes manuelles restent
+> documentées en fallback.
 
 ## 2. Layout disque actuel (référence, machine "Fedora-Hyprland-revo")
 
@@ -60,6 +66,21 @@ Boot UEFI via **shim** (Secure Boot était désactivé au moment du backup) :
 ## 4. Identifier les fichiers à restaurer
 
 ```bash
+# Depuis le live USB, sans ~/.ssh/config : surcharger NAS_HOST
+NAS_HOST=admin@IP_DU_NAS ./nas-restore.sh --list
+
+# Bonus : récupérer l'identité système (table GPT, UUID, fstab, efibootmgr)
+# AVANT de partitionner — utile si ce document a dérivé de la réalité.
+NAS_HOST=admin@IP_DU_NAS ./nas-restore.sh --sysinfo ./sysinfo
+```
+
+`--list` affiche, pour `root` et `home`, la chaîne exacte (dernier full + tous
+les incréments qui le suivent, dans l'ordre d'application) et les archives
+boot/efi/sysinfo disponibles.
+
+<details><summary>Fallback manuel (sans nas-restore.sh)</summary>
+
+```bash
 ssh nas-songsurf "cat /volume1/backup-rev0/fedora_backup/backup.log"
 ssh nas-songsurf "ls -la /volume1/backup-rev0/fedora_backup/"
 ```
@@ -70,6 +91,7 @@ chronologiquement. Note les STAMP dans l'ordre — tu les appliqueras un par un.
 
 Pour `/boot` et `/boot/efi` : un seul fichier existe à la fois
 (`boot-STAMP.tar.zst`, `boot-efi-STAMP.tar.zst`) — prends celui présent.
+</details>
 
 ## 5. Partitionner le disque cible
 
@@ -108,6 +130,17 @@ sudo mkfs.btrfs -U 6849cd01-809a-4da6-851b-11fe50f615f9 -L fedora "${DISK}3"
 sudo mkdir -p /mnt/top
 sudo mount -t btrfs -o subvolid=5 "${DISK}3" /mnt/top
 
+# Vérifie les sha256, rejoue full + incréments dans l'ordre, promeut root/home,
+# nettoie les intermédiaires (garde le dernier snapshot = parent pour que
+# nas-backup.sh reprenne les incrémentaux après restauration) :
+NAS_HOST=admin@IP_DU_NAS ./nas-restore.sh --dest /mnt/top
+
+sudo umount /mnt/top
+```
+
+<details><summary>Fallback manuel (sans nas-restore.sh)</summary>
+
+```bash
 # root : full, puis CHAQUE inc dans l'ordre chronologique du backup.log
 ssh nas-songsurf "cat /volume1/backup-rev0/fedora_backup/root-FULLSTAMP_full.btrfs.zst" \
   | zstd -d | sudo btrfs receive /mnt/top/
@@ -127,9 +160,8 @@ ssh nas-songsurf "cat /volume1/backup-rev0/fedora_backup/home-FULLSTAMP_full.btr
 # ... incréments home ...
 sudo btrfs subvolume snapshot /mnt/top/home-DERNIERSTAMP /mnt/top/home
 sudo btrfs subvolume delete /mnt/top/home-FULLSTAMP   # etc.
-
-sudo umount /mnt/top
 ```
+</details>
 
 ## 8. Monter pour le chroot + restaurer boot/efi
 
@@ -140,11 +172,19 @@ sudo mount -o subvol=home "${DISK}3" /mnt/restore/home
 sudo mount "${DISK}2" /mnt/restore/boot
 sudo mount "${DISK}1" /mnt/restore/boot/efi
 
+NAS_HOST=admin@IP_DU_NAS ./nas-restore.sh \
+  --boot /mnt/restore/boot --efi /mnt/restore/boot/efi
+```
+
+<details><summary>Fallback manuel (sans nas-restore.sh)</summary>
+
+```bash
 ssh nas-songsurf "cat /volume1/backup-rev0/fedora_backup/boot-STAMP.tar.zst" \
   | zstd -d | sudo tar -xpf - --selinux --acls --xattrs -C /mnt/restore/boot/
 ssh nas-songsurf "cat /volume1/backup-rev0/fedora_backup/boot-efi-STAMP.tar.zst" \
   | zstd -d | sudo tar -xpf - -C /mnt/restore/boot/efi/
 ```
+</details>
 
 ## 9. Chroot et finalisation du bootloader
 
@@ -164,6 +204,8 @@ grub2-mkconfig -o /etc/grub2-efi.cfg
 
 # Recrée l'entrée NVRAM UEFI (les anciens GUID de partition ne sont plus valides
 # après le repartitionnement, même si les UUID de filesystem ont été conservés)
+# Si efibootmgr râle "EFI variables are not supported" :
+#   mount -t efivarfs efivarfs /sys/firmware/efi/efivars
 efibootmgr -c -d /dev/sda -p 1 -L "Fedora" -l '\EFI\fedora\shimx64.efi'
 efibootmgr -v   # vérifie qu'il n'y a pas de doublon / entrée Windows perdue
 
@@ -193,9 +235,11 @@ et sélectionner l'entrée recréée à l'étape 9.
 
 - Un fichier `_inc` seul, sans son `_full` parent, **n'est pas restaurable** —
   c'est pour ça que `nas-backup.sh` garde toute la chaîne sur le NAS (voir son
-  header). Si jamais tu trouves un NAS avec uniquement des `_inc` orphelins
+  header) et ne purge l'ancienne chaîne qu'après **vérification sha256** du
+  nouveau full. Si jamais tu trouves un NAS avec uniquement des `_inc` orphelins
   (ancien bug corrigé début juillet 2026), il faudra relancer un `--full`
-  depuis la machine source avant de pouvoir t'en servir.
+  depuis la machine source avant de pouvoir t'en servir — `nas-restore.sh --list`
+  le détecte et te le dit.
 - `/boot` et `/boot/efi` n'ont **qu'une seule version** sur le NAS — pas
   d'historique, juste le dernier état connu. Normal : ils changent rarement
   (mises à jour kernel/GRUB) et sont petits.

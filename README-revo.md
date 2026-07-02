@@ -5,8 +5,8 @@ adapté pour :
 
 1. **Intégrer mes dotfiles** ([Rev0li/dotfiles](https://github.com/Rev0li/dotfiles) :
    WezTerm, Zsh modulaire, Helix, Starship) à la place d'oh-my-zsh.
-2. **Ajouter `backup.sh` / `restore.sh`** : snapshots horodatés (DNF + Flatpak +
-   COPR + configs).
+2. **Ajouter `backup.sh` / `restore.sh`** : snapshots horodatés (DNF + Flatpak
+   avec remotes + COPR + RPM Fusion + `.repo` tiers + configs).
 3. **Documenter chaque étape** en bash *et* en équivalent Ansible.
 
 > **Matériel cible** : Intel i5-7600K · NVIDIA GTX 1060 6 Go · 16 Go RAM · Fedora 40+ (DNF5).
@@ -22,7 +22,7 @@ install.sh                 # menu whiptail → coche des options → boucle case
     ├── copr.sh / 00-hypr-pkgs.sh / hyprland.sh / nvidia.sh ...
     ├── zsh.sh               # ← MODIFIÉ (voir §2)
     └── dotfiles-main.sh     # ← MODIFIÉ (voir §2)
-preset.sh                  # surcharge les ON/OFF : ./install.sh --preset preset.sh
+preset.sh                  # ON/OFF : pré-coche la checklist (--preset), ou pilote tout (--preset + --unattended)
 ```
 
 Chaque sous-script `source Global_functions.sh` (qui fournit `install_package()`,
@@ -174,8 +174,12 @@ Contenu d'un snapshot :
 | Fichier | Source | Commande clé |
 |---------|--------|--------------|
 | `dnf-userinstalled.txt` | paquets installés explicitement | `dnf repoquery --userinstalled` |
-| `flatpak-apps.txt` | applis Flatpak | `flatpak list --app` |
+| `flatpak-apps.txt` | applis Flatpak + remote d'origine | `flatpak list --app --columns=application,origin` |
+| `flatpak-remotes.txt` | remotes Flatpak (nom + url) | `flatpak remotes` |
 | `copr-repos.txt` | dépôts COPR activés | parse de `/etc/yum.repos.d/` |
+| `rpmfusion.txt` | release-packages RPM Fusion installés | `rpm -q rpmfusion-*-release` |
+| `yum-repos-tiers/` | `.repo` tiers (brave, vscode, docker...) | copie de `/etc/yum.repos.d/` |
+| `repos-enabled.txt` | dépôts activés (référence humaine) | `dnf repolist --enabled` |
 | `config-backup.tar.gz` | configs `~/.config` (hors dotfiles) | `tar -czf` |
 | `manifest.txt` | métadonnées (date, kernel, Fedora) | — |
 
@@ -214,12 +218,16 @@ il logge un `⚠` et continue.
 ./restore.sh --no-configs     # paquets seulement
 ```
 
-Ordre des étapes (les paquets DNF peuvent dépendre des COPR) :
+Ordre des étapes (les paquets DNF peuvent dépendre des dépôts) :
 
 1. `sudo dnf copr enable -y <repo>` pour chaque COPR
-2. `sudo dnf install -y --skip-unavailable` sur la liste DNF
-3. `flatpak install -y flathub <app>` pour chaque appli
-4. extraction de l'archive de configs (**l'existant est sauvegardé** dans
+2. RPM Fusion (release-RPM pour la version Fedora courante) + copie des
+   `.repo` tiers — **sinon `--skip-unavailable` sauterait `akmod-nvidia`,
+   brave, vscode... en silence**
+3. `sudo dnf install -y --skip-unavailable` sur la liste DNF
+4. remotes Flatpak recréés, puis `flatpak install -y <origine> <app>` pour
+   chaque appli (depuis son remote d'origine)
+5. extraction de l'archive de configs (**l'existant est sauvegardé** dans
    `~/.config/.restore-backup_<date>/` avant écrasement)
 
 **Idempotent** : DNF et Flatpak ignorent ce qui est déjà installé, donc on peut
@@ -228,8 +236,9 @@ relancer sans risque. `--skip-unavailable` évite qu'un paquet disparu casse tou
 <details><summary><b>Équivalent Ansible</b></summary>
 
 Le restore est précisément ce pour quoi Ansible brille : un playbook *est* un état
-désiré rejouable. La logique impérative de `restore.sh` (COPR → DNF → Flatpak →
-configs) correspond à une suite de tâches `dnf` / `flatpak` / `unarchive`, chacune
+désiré rejouable. La logique impérative de `restore.sh` (COPR → RPM Fusion/tiers
+→ DNF → Flatpak → configs) correspond à une suite de tâches `dnf` / `flatpak` /
+`unarchive`, chacune
 idempotente, sans le `--skip-unavailable` à gérer à la main.
 </details>
 
@@ -243,8 +252,10 @@ sudo dnf upgrade --refresh -y && reboot
 
 # 2. Lancer l'install (menu interactif) — cocher : nvidia, zsh, dots, ...
 ./install.sh
-#    ou en non-interactif via preset :
+#    ou avec la checklist pré-cochée par le preset :
 ./install.sh --preset preset.sh
+#    ou 100% non-interactif (aucune question, sélection = preset) :
+./install.sh --preset preset.sh --unattended
 
 # 3. Reboot (obligatoire pour NVIDIA modeset)
 

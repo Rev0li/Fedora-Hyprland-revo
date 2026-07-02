@@ -128,6 +128,12 @@ BOOT=boot-20260701_011551.tar.zst
 EFI=boot-efi-20260701_011551.tar.zst
 ```
 
+> **Depuis juillet 2026** : `nas-restore.sh` automatise l'inventaire, la
+> vérification sha256 et le rejeu de chaîne (`NAS_HOST=$NAS NAS_DEST_PATH=$BK
+> ./nas-restore.sh --list` puis `--dest /mnt/top`). Ce drill garde les
+> commandes manuelles : c'est justement l'exercice — mais pense à tester
+> AUSSI le script au prochain passage.
+
 > Ta chaîne actuelle n'a **que des fulls** (le dernier `--full` a purgé les
 > incréments) → **aucun `_inc` à réappliquer**. Cas le plus simple.
 
