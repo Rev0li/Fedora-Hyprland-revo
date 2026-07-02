@@ -4,7 +4,7 @@
 #
 # Met en place des timers systemd --user (aucun sudo, aucun NOPASSWD) :
 #   • nas-backup-reminder.timer       — rappel quotidien 20:00 (incrémental)
-#   • nas-backup-reminder-full.timer  — rappel mensuel le 1er 20:30 (--full)
+#   • nas-backup-reminder-full.timer  — rappel hebdo dimanche 20:30 (--full)
 #
 # Chaque rappel affiche une notification swaync avec un bouton « Lancer » ;
 # au clic, un terminal kitty ouvre nas-backup.sh et sudo demande, de façon
@@ -63,7 +63,7 @@ echo "${OK} Unités copiées dans $USER_UNIT_DIR + daemon-reload." | tee -a "$LO
 
 # ── Activation des timers ────────────────────────────────────────────────────
 systemctl --user enable --now nas-backup-reminder.timer nas-backup-reminder-full.timer 2>&1 | tee -a "$LOG"
-echo "${OK} Timers activés (rappel quotidien + mensuel --full)." | tee -a "$LOG"
+echo "${OK} Timers activés (rappel quotidien + hebdo --full)." | tee -a "$LOG"
 
 printf "\n"
 echo "${OK} Rappel interactif nas-backup opérationnel." | tee -a "$LOG"

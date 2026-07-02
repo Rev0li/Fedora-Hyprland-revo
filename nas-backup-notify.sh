@@ -10,7 +10,7 @@
 #
 # Usage :
 #   nas-backup-notify.sh          # rappel incrémental (se tait si backup < 20h)
-#   nas-backup-notify.sh --full   # rappel du full mensuel (toujours notifié)
+#   nas-backup-notify.sh --full   # rappel du full hebdomadaire (toujours notifié)
 # ═══════════════════════════════════════════════════════════════════════════
 
 set -euo pipefail
@@ -39,7 +39,7 @@ if [ "$FULL" -eq 0 ] && [ "$age_h" -lt 20 ]; then
 fi
 
 if [ "$FULL" -eq 1 ]; then
-    TITLE="Sauvegarde NAS mensuelle (complète)"
+    TITLE="Sauvegarde NAS hebdomadaire (complète)"
     BODY="Dernier backup : ${age_txt}. Lancer un envoi COMPLET (--full) ?"
     RUN_CMD="$NAS_SCRIPT --full"
 else
