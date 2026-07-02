@@ -4,9 +4,10 @@
 #
 # Capture, dans un dossier daté :
 #   1. Les paquets DNF explicitement installés par l'utilisateur
-#   2. Les applications Flatpak
+#   2. Les applications Flatpak (avec leur remote d'origine) + la liste des remotes
 #   3. Les dépôts COPR activés
-#   4. Une archive des configs ~/.config gérées par KooL (hors mes dotfiles)
+#   4. Les release-packages RPM Fusion + les .repo tiers (brave, vscode...)
+#   5. Une archive des configs ~/.config gérées par KooL (hors mes dotfiles)
 #
 # Idempotent : chaque exécution crée un NOUVEAU snapshot daté, ne touche pas
 # aux précédents, et met à jour le lien `latest`. Tout est loggé avec timestamp.
@@ -55,14 +56,18 @@ else
   warn "Impossible de lister les paquets DNF user-installed."
 fi
 
-# ── 2. Applications Flatpak ────────────────────────────────────────────────
+# ── 2. Applications Flatpak (+ remotes) ────────────────────────────────────
 log "Capture des applications Flatpak..."
 if command -v flatpak >/dev/null 2>&1; then
-  flatpak list --app --columns=application >"$SNAP_DIR/flatpak-apps.txt" 2>/dev/null || true
+  # app<TAB>origine — restore.sh réinstalle chaque app depuis son remote d'origine
+  flatpak list --app --columns=application,origin >"$SNAP_DIR/flatpak-apps.txt" 2>/dev/null || true
+  flatpak remotes --columns=name,url >"$SNAP_DIR/flatpak-remotes.txt" 2>/dev/null || true
   ok "Flatpak : $(wc -l <"$SNAP_DIR/flatpak-apps.txt") app(s) → flatpak-apps.txt"
+  ok "Flatpak : $(wc -l <"$SNAP_DIR/flatpak-remotes.txt") remote(s) → flatpak-remotes.txt"
 else
   warn "flatpak non installé — ignoré."
   : >"$SNAP_DIR/flatpak-apps.txt"
+  : >"$SNAP_DIR/flatpak-remotes.txt"
 fi
 
 # ── 3. Dépôts COPR activés ─────────────────────────────────────────────────
@@ -76,14 +81,43 @@ else
   : >"$SNAP_DIR/copr-repos.txt"
 fi
 
-# ── 4. Archive des configs hors-dotfiles ───────────────────────────────────
+# ── 4. RPM Fusion + dépôts activés ─────────────────────────────────────────
+# Sans RPM Fusion, restore.sh sauterait SILENCIEUSEMENT akmod-nvidia & co
+# (--skip-unavailable) → reboot sans driver NVIDIA. On capture donc quels
+# release-packages sont installés pour les réactiver avant l'étape DNF.
+log "Capture des dépôts RPM Fusion..."
+: >"$SNAP_DIR/rpmfusion.txt"
+for rel in rpmfusion-free-release rpmfusion-nonfree-release; do
+  rpm -q --quiet "$rel" && echo "$rel" >>"$SNAP_DIR/rpmfusion.txt"
+done
+ok "RPM Fusion : $(wc -l <"$SNAP_DIR/rpmfusion.txt") release-package(s) → rpmfusion.txt"
+
+# .repo tiers (hors Fedora / COPR / RPM Fusion, recréés autrement) : brave,
+# vscode, docker... copiés tels quels, restaurés dans /etc/yum.repos.d/.
+# Les clés GPG (gpgkey=) sont réimportées par dnf au premier install.
+mkdir -p "$SNAP_DIR/yum-repos-tiers"
+for repof in /etc/yum.repos.d/*.repo; do
+  [ -f "$repof" ] || continue
+  base="$(basename "$repof")"
+  case "$base" in
+    fedora*.repo|_copr*.repo|rpmfusion-*.repo) continue ;;
+  esac
+  cp "$repof" "$SNAP_DIR/yum-repos-tiers/" 2>>"$LOG" || true
+done
+ok "Dépôts tiers : $(ls -1 "$SNAP_DIR/yum-repos-tiers" 2>/dev/null | wc -l) fichier(s) .repo → yum-repos-tiers/"
+
+# Liste complète des dépôts activés — référence humaine (contrôle croisé).
+dnf repolist --enabled >"$SNAP_DIR/repos-enabled.txt" 2>/dev/null || true
+
+# ── 5. Archive des configs hors-dotfiles ───────────────────────────────────
 log "Archivage des configs ~/.config (hors dotfiles)..."
 present=()
 for d in "${CONFIG_DIRS[@]}"; do
   [ -e "$HOME/.config/$d" ] && present+=("$d")
 done
 if [ ${#present[@]} -gt 0 ]; then
-  # On suit les symlinks (-h désactivé) pour archiver le contenu réel.
+  # Les symlinks sont archivés tels quels (pas -h) : ils pointent vers les
+  # dotfiles versionnés, inutile de dupliquer leur contenu ici.
   tar -czf "$SNAP_DIR/config-backup.tar.gz" -C "$HOME/.config" "${present[@]}" 2>>"$LOG"
   printf '%s\n' "${present[@]}" >"$SNAP_DIR/config-dirs.txt"
   ok "Configs : ${#present[@]} dossier(s) → config-backup.tar.gz"

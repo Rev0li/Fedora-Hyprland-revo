@@ -2,11 +2,12 @@
 # ═══════════════════════════════════════════════════════════════════════════
 # restore.sh — Rejoue un snapshot créé par backup.sh (Rev0li)
 #
-# Étapes (dans l'ordre, car les paquets DNF peuvent dépendre des COPR) :
+# Étapes (dans l'ordre, car les paquets DNF peuvent dépendre des dépôts) :
 #   1. Active les dépôts COPR
-#   2. Installe les paquets DNF
-#   3. Installe les applications Flatpak
-#   4. Restaure les configs ~/.config (sauvegarde l'existant avant d'écraser)
+#   2. Réactive RPM Fusion + dépôts tiers (sinon akmod-nvidia & co sautés en silence)
+#   3. Installe les paquets DNF
+#   4. Recrée les remotes Flatpak puis installe les applications
+#   5. Restaure les configs ~/.config (sauvegarde l'existant avant d'écraser)
 #
 # Idempotent : DNF/Flatpak ignorent ce qui est déjà installé ; relançable.
 #
@@ -70,7 +71,44 @@ else
   log "Aucun dépôt COPR à activer."
 fi
 
-# ── 2. Paquets DNF ─────────────────────────────────────────────────────────
+# ── 2. RPM Fusion ──────────────────────────────────────────────────────────
+if [ -s "$SNAP_DIR/rpmfusion.txt" ]; then
+  log "Réactivation des dépôts RPM Fusion..."
+  FEDORA_VER="$(rpm -E %fedora)"
+  while IFS= read -r rel; do
+    [ -z "$rel" ] && continue
+    if rpm -q --quiet "$rel"; then
+      ok "RPM Fusion déjà présent : $rel"
+      continue
+    fi
+    flavor="${rel#rpmfusion-}"; flavor="${flavor%-release}"   # free | nonfree
+    url="https://mirrors.rpmfusion.org/${flavor}/fedora/${rel}-${FEDORA_VER}.noarch.rpm"
+    if sudo dnf install -y "$url" 2>>"$LOG"; then
+      ok "RPM Fusion activé : $rel"
+    else
+      warn "Échec RPM Fusion : $rel — les paquets qui en dépendent (akmod-nvidia...) seront SAUTÉS !"
+    fi
+  done <"$SNAP_DIR/rpmfusion.txt"
+else
+  log "Aucun dépôt RPM Fusion à réactiver (snapshot ancien ou machine sans RPM Fusion)."
+fi
+
+# Dépôts tiers (.repo copiés par backup.sh : brave, vscode, docker...)
+if [ -d "$SNAP_DIR/yum-repos-tiers" ] && ls "$SNAP_DIR/yum-repos-tiers"/*.repo >/dev/null 2>&1; then
+  log "Restauration des dépôts tiers (.repo)..."
+  for repof in "$SNAP_DIR/yum-repos-tiers"/*.repo; do
+    base="$(basename "$repof")"
+    if [ -f "/etc/yum.repos.d/$base" ]; then
+      ok "Dépôt tiers déjà présent : $base"
+    elif sudo install -m 0644 "$repof" "/etc/yum.repos.d/$base" 2>>"$LOG"; then
+      ok "Dépôt tiers restauré : $base"
+    else
+      warn "Échec restauration dépôt tiers : $base"
+    fi
+  done
+fi
+
+# ── 3. Paquets DNF ─────────────────────────────────────────────────────────
 if [ -s "$SNAP_DIR/dnf-userinstalled.txt" ]; then
   log "Installation des paquets DNF (déjà installés ignorés)..."
   # --skip-unavailable (DNF5) : ne casse pas si un paquet n'existe plus.
@@ -84,18 +122,40 @@ else
   warn "Liste DNF vide ou absente."
 fi
 
-# ── 3. Applications Flatpak ────────────────────────────────────────────────
+# ── 4. Applications Flatpak ────────────────────────────────────────────────
 if [ -s "$SNAP_DIR/flatpak-apps.txt" ]; then
   if command -v flatpak >/dev/null 2>&1; then
+    log "Restauration des remotes Flatpak..."
+    if [ -s "$SNAP_DIR/flatpak-remotes.txt" ]; then
+      while IFS=$'\t' read -r rname rurl; do
+        [ -n "$rname" ] || continue
+        case "$rname" in
+          # Les .flatpakrepo embarquent la clé GPG — indispensable ; l'URL
+          # brute capturée par `flatpak remotes` n'y suffit pas.
+          flathub)      rurl="https://flathub.org/repo/flathub.flatpakrepo" ;;
+          flathub-beta) rurl="https://flathub.org/beta-repo/flathub-beta.flatpakrepo" ;;
+          fedora)       continue ;;   # préinstallé sur Fedora
+        esac
+        if flatpak remote-add --if-not-exists "$rname" "$rurl" 2>>"$LOG"; then
+          ok "Remote Flatpak : $rname"
+        else
+          warn "Échec remote Flatpak : $rname ($rurl) — à ré-ajouter à la main (clé GPG requise)."
+        fi
+      done <"$SNAP_DIR/flatpak-remotes.txt"
+    else
+      # Anciens snapshots sans flatpak-remotes.txt → flathub par défaut
+      flatpak remote-add --if-not-exists flathub \
+        https://flathub.org/repo/flathub.flatpakrepo 2>>"$LOG" || true
+    fi
+
     log "Installation des applications Flatpak..."
-    flatpak remote-add --if-not-exists flathub \
-      https://flathub.org/repo/flathub.flatpakrepo 2>>"$LOG" || true
-    while IFS= read -r app; do
+    while IFS=$'\t' read -r app origin; do
       [ -z "$app" ] && continue
-      if flatpak install -y flathub "$app" 2>>"$LOG"; then
-        ok "Flatpak : $app"
+      origin="${origin:-flathub}"   # anciens snapshots : une seule colonne
+      if flatpak install -y "$origin" "$app" 2>>"$LOG"; then
+        ok "Flatpak : $app (← $origin)"
       else
-        warn "Échec Flatpak : $app"
+        warn "Échec Flatpak : $app (remote $origin)"
       fi
     done <"$SNAP_DIR/flatpak-apps.txt"
   else
@@ -105,7 +165,7 @@ else
   log "Aucune application Flatpak à restaurer."
 fi
 
-# ── 4. Configs ~/.config ───────────────────────────────────────────────────
+# ── 5. Configs ~/.config ───────────────────────────────────────────────────
 if [ "$DO_CONFIGS" -eq 1 ] && [ -f "$SNAP_DIR/config-backup.tar.gz" ]; then
   if [ "$ASSUME_YES" -ne 1 ]; then
     echo -ne "${YELLOW}?${NC} Restaurer les configs ~/.config (l'existant sera sauvegardé) ? [y/N] "
